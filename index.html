@@ -569,7 +569,7 @@
   $('#modeGroup').addEventListener('change', () => { renderSummary(); renderCart(); });
   modal.addEventListener('click', e => { if (e.target === modal || e.target.closest('[data-close-modal]')) closeModal(); });
   /* 訂單送到 Google Apps Script → Google 試算表。留空則只在本機示範（不會存檔） */
-  const ORDER_API = '';
+  const ORDER_API = 'https://script.google.com/macros/s/AKfycbxbHY5ZxejkUO1f2-eV3PtthsGP3bx6paUNp317Gafzd5CKwRCtGC40hRn5pM7YO-QPGg/exec';
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const btn = form.querySelector('button:not([type="button"])');
