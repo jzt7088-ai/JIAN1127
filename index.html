@@ -112,6 +112,10 @@
       <p class="mt-3 text-rice/90 text-sm sm:text-base" style="text-shadow:0 2px 8px rgba(0,0,0,.6)">已被搶走 <span id="eatenCount" class="font-bold text-ember-light text-lg tabular-nums">0</span> 顆・點一下畫面再撒一把</p>
       <a href="#menu" class="pointer-events-auto mt-5 inline-flex items-center gap-2 h-11 px-6 rounded-full bg-ember hover:bg-ember-dark text-white font-bold shadow-lg transition"><i data-lucide="hand" class="w-4 h-4"></i>我也要搶</a>
     </div>
+    <div id="frenzyPops" class="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true"></div>
+    <button id="frenzyToggle" type="button" class="hidden-el absolute left-3 bottom-3 h-10 px-4 rounded-full bg-black/45 hover:bg-black/60 text-rice text-sm font-medium backdrop-blur flex items-center gap-2" aria-pressed="false">
+      <span id="frenzyToggleIcon" aria-hidden="true">❚❚</span><span id="frenzyToggleText">暫停動畫</span>
+    </button>
   </section>
 
   <!-- ================= Brand Story ================= -->
@@ -585,14 +589,368 @@
   renderTabs(); renderMenu(); renderStores(); renderCart(); icons();
 })();
 </script>
+<!-- ================= Dumpling Frenzy 3D (Three.js) ================= -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.149.0/build/three.min.js"></script>
+<script>
+(() => {
+  const section = document.getElementById('frenzy');
+  const cv2d = document.getElementById('frenzyCanvas');
+  if (!section || !cv2d || !window.THREE) return;
+  const T = THREE;
+  let renderer;
+  try {
+    renderer = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+  } catch (e) { return; } // 不支援 WebGL → 交給 2D 備援
+  window.__frenzy3D = true;
+
+  const el = renderer.domElement;
+  el.className = cv2d.className;
+  el.setAttribute('role', 'img');
+  el.setAttribute('aria-label', cv2d.getAttribute('aria-label'));
+  cv2d.replaceWith(el);
+
+  const isSmall = window.innerWidth < 700;
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const pick = a => a[(Math.random() * a.length) | 0];
+  const counter = document.getElementById('eatenCount');
+  const popLayer = document.getElementById('frenzyPops');
+  const SHOUTS = ['我的！', '好香！', '搶到了！', '再來一顆！', '好吃！', '別跟我搶！', '爆汁！', '還要！', '讓我先！'];
+
+  // ---------- 場景、相機、燈光 ----------
+  const scene = new T.Scene();
+  scene.fog = new T.Fog(0xd98a4e, 70, 210);
+  const camera = new T.PerspectiveCamera(48, 2, 0.1, 400);
+  const camBase = new T.Vector3(0, 8, 31);
+  const lookAt = new T.Vector3(0, 6, -18);
+
+  scene.add(new T.HemisphereLight(0xffe2b8, 0x5a3a28, 0.75));
+  const sunLight = new T.DirectionalLight(0xffd29a, 0.8);
+  sunLight.position.set(25, 35, 30);
+  scene.add(sunLight);
+
+  // 天空漸層
+  const sky = new T.Mesh(new T.SphereGeometry(300, 32, 16), new T.ShaderMaterial({
+    side: T.BackSide, depthWrite: false, fog: false,
+    uniforms: { top: { value: new T.Color(0x2f1c12) }, mid: { value: new T.Color(0xb0581f) }, bot: { value: new T.Color(0xf4b77f) } },
+    vertexShader: 'varying float h; void main(){ h = normalize(position).y; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: 'uniform vec3 top; uniform vec3 mid; uniform vec3 bot; varying float h; void main(){ vec3 c = h > 0.18 ? mix(mid, top, smoothstep(0.18, 0.6, h)) : mix(bot, mid, smoothstep(-0.05, 0.18, h)); gl_FragColor = vec4(c, 1.0); }'
+  }));
+  scene.add(sky);
+  const sun = new T.Mesh(new T.CircleGeometry(14, 40), new T.MeshBasicMaterial({ color: 0xffd596, fog: false }));
+  sun.position.set(38, 22, -150);
+  scene.add(sun);
+
+  // ---------- 山 ----------
+  const mountains = [
+    { x: -34, z: -52, r: 17, h: 17, c: 0x7a5340 },
+    { x: -10, z: -60, r: 20, h: 25, c: 0x8a5f45 },
+    { x: 14, z: -54, r: 18, h: 20, c: 0x6e4630 },
+    { x: 37, z: -50, r: 16, h: 15, c: 0x7f573d },
+    { x: -55, z: -70, r: 22, h: 22, c: 0x9a6a4a },
+    { x: 58, z: -72, r: 24, h: 24, c: 0x9a6a4a }
+  ];
+  mountains.forEach(m => {
+    const mesh = new T.Mesh(new T.ConeGeometry(m.r, m.h, 10, 3), new T.MeshStandardMaterial({ color: m.c, flatShading: true, roughness: 1 }));
+    mesh.position.set(m.x, m.h / 2 - 0.5, m.z);
+    mesh.rotation.y = rand(0, 6);
+    scene.add(mesh);
+  });
+
+  // ---------- 海 ----------
+  const seaGeo = new T.PlaneGeometry(200, 54, isSmall ? 50 : 90, 24);
+  seaGeo.rotateX(-Math.PI / 2);
+  seaGeo.translate(0, 0, -20);
+  const seaPos = seaGeo.attributes.position;
+  const seaBase = Float32Array.from(seaPos.array);
+  const sea = new T.Mesh(seaGeo, new T.MeshStandardMaterial({ color: 0x3f8aa3, flatShading: true, roughness: 0.35, metalness: 0.1 }));
+  scene.add(sea);
+  const seaH = (x, z, t) => Math.sin(x * 0.28 + t * 1.6) * 0.28 + Math.cos(z * 0.45 + t * 1.2) * 0.22;
+
+  // ---------- 沙灘與煎鍋 ----------
+  const beach = new T.Mesh(new T.BoxGeometry(200, 1, 22), new T.MeshStandardMaterial({ color: 0xe8cf9e, roughness: 1 }));
+  beach.position.set(0, -0.2, 17);
+  scene.add(beach);
+  const PAN = new T.Vector3(0, 0.3, 11);
+  const pan = new T.Mesh(new T.CylinderGeometry(3.4, 2.8, 0.9, 32, 1, true), new T.MeshStandardMaterial({ color: 0x2b2b2b, metalness: 0.6, roughness: 0.4, side: T.DoubleSide }));
+  pan.position.set(PAN.x, 0.75, PAN.z);
+  const panBottom = new T.Mesh(new T.CircleGeometry(2.85, 32), new T.MeshStandardMaterial({ color: 0x3a2a1e, roughness: 0.6 }));
+  panBottom.rotation.x = -Math.PI / 2; panBottom.position.set(PAN.x, 0.36, PAN.z);
+  const handle = new T.Mesh(new T.BoxGeometry(4.5, 0.35, 0.6), new T.MeshStandardMaterial({ color: 0x4a2e1f, roughness: 0.8 }));
+  handle.position.set(PAN.x + 5.4, 1.0, PAN.z + 0.4); handle.rotation.z = 0.12;
+  scene.add(pan, panBottom, handle);
+
+  // ---------- 煎餃幾何 (底部金黃脆皮 + 頂部褶子) ----------
+  const dGeo = new T.SphereGeometry(0.5, 18, 12);
+  {
+    const p = dGeo.attributes.position, cols = [];
+    const dough = new T.Color(0xfbecd0), crisp = new T.Color(0xc8701f), mid = new T.Color(0xeec98e);
+    for (let i = 0; i < p.count; i++) {
+      let x = p.getX(i) * 1.5, y = p.getY(i) * 0.95, z = p.getZ(i) * 0.6;
+      if (y < -0.12) y = -0.12;                       // 平底
+      if (y > 0.25) y += Math.sin(x * 14) * 0.035;    // 褶子
+      y -= x * x * 0.18;                              // 彎月形
+      p.setXYZ(i, x, y, z);
+      const c = y < -0.08 ? crisp : (y < 0.02 ? mid : dough);
+      cols.push(c.r, c.g, c.b);
+    }
+    dGeo.setAttribute('color', new T.Float32BufferAttribute(cols, 3));
+    dGeo.computeVertexNormals();
+  }
+  const MAX_D = isSmall ? 90 : 170;
+  const dMesh = new T.InstancedMesh(dGeo, new T.MeshStandardMaterial({ vertexColors: true, roughness: 0.55 }), MAX_D);
+  dMesh.frustumCulled = false; dMesh.count = 0;
+  scene.add(dMesh);
+
+  // 鍋裡靜置的幾顆
+  for (let i = 0; i < 7; i++) {
+    const m = new T.Mesh(dGeo, dMesh.material);
+    const a = i / 7 * Math.PI * 2;
+    m.position.set(PAN.x + Math.cos(a) * 1.7, 0.5, PAN.z + Math.sin(a) * 1.7);
+    m.rotation.y = -a; m.scale.setScalar(1.6);
+    scene.add(m);
+  }
+
+  // ---------- 人群 (InstancedMesh 部件) ----------
+  const people = [];
+  const addPerson = (x, y, z, s, group, swim) => people.push({
+    x, y, z, hx: x, hz: z, s, group, swim, jy: 0, vy: 0, yaw: 0, chomp: 0, hasTarget: false,
+    ph: rand(0, 6.28), as: rand(6, 11), incoming: 0
+  });
+  mountains.slice(0, 4).forEach(m => {
+    const n = isSmall ? 22 : 40;
+    for (let i = 0; i < n; i++) {
+      const hh = rand(0.02, 0.8) * m.h, r = m.r * (1 - hh / m.h) + 0.3, a = rand(-1.25, 1.25);
+      addPerson(m.x + Math.sin(a) * r, hh - 0.5, m.z + Math.cos(a) * r, 1.25, 0, false);
+    }
+  });
+  for (let i = 0; i < (isSmall ? 26 : 55); i++) addPerson(rand(-38, 38), -0.95, rand(-36, 3), 1.1, 1, true);
+  for (let i = 0; i < (isSmall ? 18 : 34); i++) {
+    let x; do { x = rand(-24, 24); } while (Math.abs(x) < 5.5);
+    addPerson(x, 0.3, rand(12, 20), 1, 2, false);
+  }
+  const N = people.length;
+  const SKINS = [0xf6d1a5, 0xeab98a, 0xd49a6a, 0xb07548, 0x8a5530, 0xffe0bd];
+  const SHIRTS = [0xe07a2f, 0xc2611a, 0x7a5340, 0x2f6f8f, 0xa23b3b, 0x3e7d4a, 0xd9a441, 0x6b4c9a, 0xf7f1e6, 0x2d2d2d];
+  const HAIRS = [0x2a1a10, 0x1a1a1a, 0x4a2e1f, 0x6b3e22, 0x9a9a9a];
+
+  const std = () => new T.MeshStandardMaterial({ color: 0xffffff, roughness: 0.85, flatShading: true });
+  const armGeo = new T.CapsuleGeometry ? new T.CapsuleGeometry(0.1, 0.62, 3, 6) : new T.CylinderGeometry(0.1, 0.1, 0.8, 6);
+  armGeo.translate(0, 0.4, 0);
+  const hairGeo = new T.SphereGeometry(0.41, 12, 6, 0, Math.PI * 2, 0, Math.PI * 0.5);
+  const parts = {
+    body: new T.InstancedMesh(new T.CylinderGeometry(0.33, 0.45, 1.0, 9), std(), N),
+    head: new T.InstancedMesh(new T.SphereGeometry(0.38, 14, 10), std(), N),
+    hair: new T.InstancedMesh(hairGeo, std(), N),
+    armL: new T.InstancedMesh(armGeo, std(), N),
+    armR: new T.InstancedMesh(armGeo, std(), N),
+    mouth: new T.InstancedMesh(new T.SphereGeometry(0.12, 10, 8), new T.MeshBasicMaterial({ color: 0x5a1414 }), N),
+    eyes: new T.InstancedMesh(new T.SphereGeometry(0.055, 8, 6), new T.MeshBasicMaterial({ color: 0x111111 }), N * 2)
+  };
+  const col = new T.Color();
+  people.forEach((p, i) => {
+    const skin = pick(SKINS), shirt = pick(SHIRTS);
+    parts.body.setColorAt(i, col.setHex(shirt));
+    parts.head.setColorAt(i, col.setHex(skin));
+    parts.hair.setColorAt(i, col.setHex(pick(HAIRS)));
+    parts.armL.setColorAt(i, col.setHex(p.swim ? skin : shirt));
+    parts.armR.setColorAt(i, col.setHex(p.swim ? skin : shirt));
+  });
+  Object.values(parts).forEach(m => { m.frustumCulled = false; m.instanceMatrix.setUsage(T.DynamicDrawUsage); scene.add(m); });
+
+  // ---------- 動態 ----------
+  const dumps = [];
+  const G = 18;
+  let eaten = 0, time = 0;
+  const headPos = (p, out) => out.set(p.x, p.y + p.jy + 1.35 * p.s, p.z);
+  const tmpV = new T.Vector3(), tmpV2 = new T.Vector3();
+
+  function launch(burst) {
+    if (dumps.length >= MAX_D) return;
+    const target = pick(people);
+    const start = new T.Vector3(PAN.x + rand(-2, 2), 1.2, PAN.z + rand(-2, 2));
+    headPos(target, tmpV);
+    tmpV.x += rand(-0.5, 0.5); tmpV.z += rand(-0.5, 0.5);
+    const dist = start.distanceTo(tmpV);
+    const flight = (burst ? 0.9 : 1.3) + dist / 28 + rand(0, 0.5);
+    const v = new T.Vector3((tmpV.x - start.x) / flight, (tmpV.y - start.y + 0.5 * G * flight * flight) / flight, (tmpV.z - start.z) / flight);
+    target.incoming++;
+    dumps.push({ p: start, v, rot: new T.Euler(rand(0, 6), rand(0, 6), rand(0, 6)), spin: new T.Vector3(rand(-5, 5), rand(-5, 5), rand(-5, 5)),
+      age: 0, flight, target, group: target.group, s: rand(1.2, 1.7) });
+  }
+
+  function popText(p) {
+    if (!popLayer || popLayer.childElementCount > 14) return;
+    headPos(p, tmpV2).project(camera);
+    if (tmpV2.z > 1) return;
+    const w = el.clientWidth, h = el.clientHeight;
+    const span = document.createElement('span');
+    span.textContent = pick(SHOUTS);
+    const size = p.group === 2 ? 20 : p.group === 1 ? 15 : 12;
+    span.style.cssText = `position:absolute;left:${(tmpV2.x + 1) / 2 * w}px;top:${(1 - tmpV2.y) / 2 * h}px;transform:translate(-50%,-100%);font:900 ${size}px "Noto Sans TC",sans-serif;color:#fff3d6;-webkit-text-stroke:3px #2f1c12;paint-order:stroke fill;white-space:nowrap;transition:transform 1s ease-out,opacity 1s ease-out;`;
+    popLayer.appendChild(span);
+    requestAnimationFrame(() => { span.style.transform = 'translate(-50%,-260%)'; span.style.opacity = '0'; });
+    setTimeout(() => span.remove(), 1050);
+  }
+
+  let spawnAcc = 0;
+  function update(dt) {
+    time += dt;
+    spawnAcc += dt;
+    const rate = isSmall ? 0.09 : 0.05;
+    while (spawnAcc > rate) { spawnAcc -= rate; launch(false); }
+
+    // 海浪
+    for (let i = 0; i < seaPos.count; i++) {
+      const x = seaBase[i * 3], z = seaBase[i * 3 + 2];
+      seaPos.setY(i, seaH(x, z, time));
+    }
+    seaPos.needsUpdate = true;
+
+    // 人
+    for (const p of people) {
+      p.hasTarget = p.incoming > 0;
+      const wantYaw = Math.atan2(PAN.x - p.x, PAN.z - p.z) * (p.group === 2 ? 1 : 0.35);
+      p.yaw += (wantYaw - p.yaw) * Math.min(1, dt * 3);
+      if (p.jy === 0 && p.vy === 0) {
+        if (p.hasTarget && Math.random() < dt * 3.5) p.vy = rand(5, 8);
+        else if (Math.random() < dt * 0.35) p.vy = rand(3, 5);
+      }
+      if (p.vy !== 0 || p.jy > 0) { p.vy -= 22 * dt; p.jy += p.vy * dt; if (p.jy <= 0) { p.jy = 0; p.vy = 0; } }
+      if (p.swim) p.y = -0.95 + seaH(p.x, p.z, time) * 0.9;
+      const lim = 1.2;
+      p.x = p.hx + Math.sin(time * 1.7 + p.ph) * (p.hasTarget ? lim : 0.25);
+      p.chomp = Math.max(0, p.chomp - dt);
+    }
+
+    // 煎餃
+    for (let i = dumps.length - 1; i >= 0; i--) {
+      const d = dumps[i];
+      d.age += dt;
+      d.v.y -= G * dt;
+      d.p.addScaledVector(d.v, dt);
+      d.rot.x += d.spin.x * dt; d.rot.y += d.spin.y * dt; d.rot.z += d.spin.z * dt;
+      let catcher = null;
+      if (d.v.y < 0 && d.age > d.flight * 0.7) {
+        for (const p of people) {
+          if (p.group !== d.group) continue;
+          headPos(p, tmpV);
+          if (tmpV.distanceToSquared(d.p) < (1.25 * p.s) ** 2) { catcher = p; break; }
+        }
+      }
+      if (catcher || d.p.y < -4) {
+        d.target.incoming = Math.max(0, d.target.incoming - 1);
+        if (catcher) {
+          catcher.chomp = 0.6; eaten++;
+          if (counter) counter.textContent = eaten.toLocaleString();
+          if (catcher.group === 2 || Math.random() < (catcher.group === 1 ? 0.35 : 0.12)) popText(catcher);
+        }
+        dumps.splice(i, 1);
+      }
+    }
+  }
+
+  const M = new T.Matrix4(), L = new T.Matrix4(), Q = new T.Quaternion(), E = new T.Euler(), S = new T.Vector3(), P = new T.Vector3();
+  function setPart(mesh, idx, base, lx, ly, lz, rx, ry, rz, sx, sy, sz) {
+    E.set(rx, ry, rz); Q.setFromEuler(E); P.set(lx, ly, lz); S.set(sx, sy, sz);
+    L.compose(P, Q, S);
+    mesh.setMatrixAt(idx, M.multiplyMatrices(base, L));
+  }
+  const BASE = new T.Matrix4();
+  function render() {
+    people.forEach((p, i) => {
+      E.set(0, p.yaw, 0); Q.setFromEuler(E); P.set(p.x, p.y + p.jy, p.z); S.setScalar(p.s);
+      BASE.compose(P, Q, S);
+      const frantic = p.hasTarget ? 1 : 0.3;
+      const wave = Math.sin(time * p.as + p.ph);
+      setPart(parts.body, i, BASE, 0, 0.5, 0, 0, 0, 0, 1, 1, 1);
+      setPart(parts.head, i, BASE, 0, 1.35, 0, -0.25 * frantic, 0, 0, 1, 1, 1);
+      setPart(parts.hair, i, BASE, 0, 1.39, -0.02, -0.25 * frantic, 0, 0, 1, 1, 1);
+      setPart(parts.armL, i, BASE, -0.4, 0.92, 0, 0.25 * wave * frantic, 0, 0.35 + frantic * (0.35 + 0.3 * wave), 1, 1, 1);
+      setPart(parts.armR, i, BASE, 0.4, 0.92, 0, -0.25 * wave * frantic, 0, -(0.35 + frantic * (0.35 - 0.3 * wave)), 1, 1, 1);
+      const m = p.chomp > 0 ? Math.abs(Math.sin(p.chomp * 28)) : (p.hasTarget ? 0.6 + 0.5 * Math.abs(Math.sin(time * 10 + p.ph)) : 0.3);
+      setPart(parts.mouth, i, BASE, 0, 1.22, 0.33, 0, 0, 0, 1.1, 0.25 + m * 1.1, 0.5);
+      setPart(parts.eyes, i * 2, BASE, -0.13, 1.44, 0.34, 0, 0, 0, 1, p.chomp > 0 ? 0.3 : 1, 1);
+      setPart(parts.eyes, i * 2 + 1, BASE, 0.13, 1.44, 0.34, 0, 0, 0, 1, p.chomp > 0 ? 0.3 : 1, 1);
+    });
+    Object.values(parts).forEach(m => { m.instanceMatrix.needsUpdate = true; });
+
+    dumps.forEach((d, i) => {
+      Q.setFromEuler(d.rot); S.setScalar(d.s);
+      dMesh.setMatrixAt(i, M.compose(d.p, Q, S));
+    });
+    dMesh.count = dumps.length;
+    dMesh.instanceMatrix.needsUpdate = true;
+
+    camera.position.set(camBase.x + Math.sin(time * 0.15) * 5 + pointer.x * 6, camBase.y + Math.sin(time * 0.23) * 0.8 - pointer.y * 2.5, camBase.z);
+    camera.lookAt(lookAt);
+    renderer.render(scene, camera);
+  }
+
+  // ---------- 尺寸、互動、播放控制 ----------
+  function resize() {
+    const w = el.clientWidth || section.clientWidth, h = el.clientHeight || 500;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, isSmall ? 1.5 : 1.75));
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    camera.fov = w / h < 0.9 ? 62 : 48;
+    camera.updateProjectionMatrix();
+  }
+  const pointer = { x: 0, y: 0 };
+  el.addEventListener('pointermove', e => {
+    const r = el.getBoundingClientRect();
+    pointer.x = ((e.clientX - r.left) / r.width - 0.5); pointer.y = ((e.clientY - r.top) / r.height - 0.5);
+  });
+  el.addEventListener('pointerleave', () => { pointer.x = 0; pointer.y = 0; });
+  el.addEventListener('click', () => { for (let i = 0; i < 30; i++) launch(true); if (!running) { update(0.016); render(); } });
+
+  let running = false, paused = false, visible = false, last = 0;
+  function loop(t) {
+    if (!running) return;
+    const dt = Math.min(0.05, (t - last) / 1000 || 0.016);
+    last = t;
+    update(dt); render();
+    requestAnimationFrame(loop);
+  }
+  function sync() {
+    const should = visible && !paused && !document.hidden;
+    if (should && !running) { running = true; last = performance.now(); requestAnimationFrame(loop); }
+    else if (!should) running = false;
+  }
+
+  const btn = document.getElementById('frenzyToggle');
+  if (btn) {
+    btn.classList.remove('hidden-el');
+    btn.addEventListener('click', () => {
+      paused = !paused;
+      btn.setAttribute('aria-pressed', String(paused));
+      document.getElementById('frenzyToggleIcon').textContent = paused ? '▶' : '❚❚';
+      document.getElementById('frenzyToggleText').textContent = paused ? '播放動畫' : '暫停動畫';
+      sync();
+    });
+  }
+
+  window.addEventListener('resize', resize);
+  document.addEventListener('visibilitychange', sync);
+  if ('IntersectionObserver' in window) {
+    new IntersectionObserver(es => { visible = es[0].isIntersecting; sync(); }, { threshold: 0.02 }).observe(el);
+  } else { visible = true; }
+  resize();
+  for (let i = 0; i < 60; i++) update(1 / 30);
+  render();
+  sync();
+})();
+</script>
+
 <!-- ================= Dumpling Frenzy Script ================= -->
 <script>
 (() => {
+  // 2D 版本僅作為備援：3D (WebGL) 成功啟動時不執行
+  if (window.__frenzy3D) return;
   const cv = document.getElementById('frenzyCanvas');
   if (!cv || !cv.getContext) return;
   const ctx = cv.getContext('2d');
   const counter = document.getElementById('eatenCount');
-  const reduceMotion = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reduceMotion = false; // 使用者明確需要動畫，一律播放
 
   const SKINS = ['#f6d1a5', '#eab98a', '#d49a6a', '#b07548', '#8a5530', '#ffe0bd'];
   const SHIRTS = ['#e07a2f', '#c2611a', '#7a5340', '#2f6f8f', '#a23b3b', '#3e7d4a', '#d9a441', '#6b4c9a', '#f7f1e6'];
