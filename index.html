@@ -4,6 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>煎記 JIAN JI｜極簡現代鍋貼專賣</title>
+<!-- PWA -->
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#4a2e1f">
+<meta name="description" content="煎記鍋貼：線上點餐、冷凍禮盒、門市據點與線上預約。">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/icon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/icon-16.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="煎記">
 <!-- 字體：標題 Noto Serif TC、內文 Noto Sans TC -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -61,6 +72,9 @@
       <a href="#contact" class="hover:text-ember transition">聯絡我們</a>
     </nav>
     <div class="flex items-center gap-2">
+      <button id="installBtn" type="button" class="hidden-el items-center gap-1.5 h-10 px-4 rounded-full border border-wood/20 hover:bg-wood/10 text-sm font-bold transition" aria-label="安裝煎記 App">
+        <i data-lucide="download" class="w-4 h-4"></i><span class="hidden sm:inline">安裝 App</span>
+      </button>
       <button id="cartBtn" class="relative w-11 h-11 grid place-items-center rounded-full hover:bg-wood/10 transition" aria-label="開啟購物車">
         <i data-lucide="shopping-bag" class="w-5 h-5"></i>
         <span id="cartBadge" class="absolute -top-0.5 -right-0.5 min-w-[20px] h-5 px-1 rounded-full bg-ember text-white text-xs font-bold grid place-items-center scale-0 transition-transform">0</span>
@@ -1308,6 +1322,29 @@
   window.addEventListener('resize', resize);
   resize();
   if (reduceMotion) { for (let i = 0; i < 40; i++) spawnDumpling(); update(0.6); draw(); }
+})();
+</script>
+<!-- ================= PWA：Service Worker 與安裝按鈕 ================= -->
+<script>
+(() => {
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
+  const btn = document.getElementById('installBtn');
+  let deferred = null;
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    deferred = e;
+    if (btn) { btn.classList.remove('hidden-el'); btn.classList.add('inline-flex'); }
+  });
+  btn && btn.addEventListener('click', async () => {
+    if (!deferred) return;
+    deferred.prompt();
+    await deferred.userChoice.catch(() => {});
+    deferred = null;
+    btn.classList.add('hidden-el'); btn.classList.remove('inline-flex');
+  });
+  window.addEventListener('appinstalled', () => { btn && btn.classList.add('hidden-el'); });
 })();
 </script>
 </body>
