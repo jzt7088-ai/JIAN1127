@@ -319,6 +319,8 @@
       <div class="mt-5 grid gap-3">
         <label class="text-sm font-medium">姓名<input name="name" required class="mt-1 w-full h-11 px-4 rounded-xl border border-wood/20 bg-white text-base outline-none focus:ring-2 focus:ring-ember"></label>
         <label class="text-sm font-medium">手機<input name="phone" required type="tel" pattern="09\d{8}" placeholder="0912345678" class="mt-1 w-full h-11 px-4 rounded-xl border border-wood/20 bg-white text-base outline-none focus:ring-2 focus:ring-ember"></label>
+        <label class="text-sm font-medium">Email（選填，寄送訂單確認用）<input name="email" type="email" autocomplete="email" class="mt-1 w-full h-11 px-4 rounded-xl border border-wood/20 bg-white text-base outline-none focus:ring-2 focus:ring-ember"></label>
+        <input name="website" tabindex="-1" autocomplete="off" aria-hidden="true" class="hidden-el">
         <label id="addrField" class="text-sm font-medium hidden-el">宅配地址<input name="address" class="mt-1 w-full h-11 px-4 rounded-xl border border-wood/20 bg-white text-base outline-none focus:ring-2 focus:ring-ember"></label>
         <label class="text-sm font-medium">備註<textarea name="note" rows="2" class="mt-1 w-full px-4 py-2 rounded-xl border border-wood/20 bg-white text-base outline-none focus:ring-2 focus:ring-ember"></textarea></label>
       </div>
@@ -566,10 +568,34 @@
   $('#checkoutBtn').addEventListener('click', openCheckout);
   $('#modeGroup').addEventListener('change', () => { renderSummary(); renderCart(); });
   modal.addEventListener('click', e => { if (e.target === modal || e.target.closest('[data-close-modal]')) closeModal(); });
-  form.addEventListener('submit', e => {
+  /* 訂單送到 Google Apps Script → Google 試算表。留空則只在本機示範（不會存檔） */
+  const ORDER_API = '';
+  form.addEventListener('submit', async e => {
     e.preventDefault();
-    const orderNo = 'JJ' + Date.now().toString().slice(-8);
-    const mode = getMode(), total = subtotal() + shippingFee();
+    const btn = form.querySelector('button:not([type="button"])');
+    const mode = getMode();
+    const payload = {
+      items: Object.entries(cart).map(([id, qty]) => ({ id, qty })),
+      mode, name: form.name.value.trim(), phone: form.phone.value.trim(),
+      email: form.email ? form.email.value.trim() : '', address: form.address.value.trim(),
+      note: form.note.value.trim(), website: form.website ? form.website.value : '',
+      clientTotal: subtotal() + shippingFee()
+    };
+    let orderNo, total = payload.clientTotal;
+    if (ORDER_API) {
+      btn.disabled = true; const label = btn.textContent; btn.textContent = '送出中…';
+      try {
+        const res = await fetch(ORDER_API, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(payload) });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || '送出失敗');
+        orderNo = data.orderNo; total = data.total;
+      } catch (err) {
+        toast((err && err.message && !/fetch|JSON/i.test(err.message)) ? err.message : '網路不穩，訂單尚未送出，請再試一次');
+        return;
+      } finally { btn.disabled = false; btn.textContent = label; }
+    } else {
+      orderNo = 'JJ' + Date.now().toString().slice(-8);
+    }
     $('#successText').textContent = `訂單編號 ${orderNo}｜${mode}｜總計 ${money(total)}。${mode === '宅配' ? '我們將於 2 個工作天內出貨。' : '餐點約 15–20 分鐘完成，請留意簡訊通知。'}`;
     cart = {}; saveCart(); renderCart(); form.reset();
     form.classList.add('hidden-el'); success.classList.remove('hidden-el');
